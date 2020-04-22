@@ -5,5 +5,5 @@ used in the publication "A local regulatory T cell feedback circuit maintains im
 
 ## Executing the model
 
-In the folder 'codes', excecute the file 'full_model.m'.
+In the folder 'codes', execute the file 'full_model.m'.
 
