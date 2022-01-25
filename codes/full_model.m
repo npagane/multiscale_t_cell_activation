@@ -64,20 +64,24 @@ k_transc_costim_mIL2 = 0; % not used since TCR and costimulation are merged as '
 k_deg_mIL2 = 0.2;
 k_transl_IL2 = 266;
 
-
 %%dynamics of PI3K and MYC
 k_deg_mMyc = 1/5;
 k_deg_Myc = 0.099;
 k_transc_basal_mMyc = 0.03*k_deg_Myc;
 k_transc_PI3K_mMyc = 50*k_deg_Myc;
 k_transl_Myc = 20*k_deg_mMyc;
+K_TCR_PI3K = prmset{idx_prm, 12}; %NP EDIT deduced the following params (0.3)
+K_costim_PI3K = prmset{idx_prm, 14};
+K_JAK_PI3K = prmset{idx_prm, 13}; 
+n_TCR_PI3K = 1;
+n_costim_PI3K = 1;
+n_JAK_PI3K = 1;
 
 %%dynamics of CD86 (not used in this version)
 k_transc_mCD80_86 = 20;
 k_deg_mCD80_86 = 1/5;
 k_transl_CD80_86 = 150*2;
 k_deg_CD80_86 = 0.05*2; %to make the initial state as a stationary state
-
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%
@@ -114,7 +118,7 @@ r = linspace(5, r_max,40);
 
 D_IL2 = prmset{idx_prm, 16};
 n_tr0_low = prmset{idx_prm, 15}*0.6;
-n_tr0_high = prmset{idx_prm, 15}*0.6;
+n_tr0_high = 10*prmset{idx_prm, 15}*0.6;
 n_tr0 = [n_tr0_high n_tr0_high n_tr0_high repmat(n_tr0_low,1,37)];
 n_tr0_trans = 0; % threshold of treg density above which effective transendocytosis happens
 
@@ -156,7 +160,6 @@ S_T = 4*pi*5^2 ;%surface area of T cells, assuming the radious of T cell is 5 um
 S_DC = 2000; % surface area of Dendritic cells
 
 
-
 %%%%%%%%%%%%%%%%%%%%%%
 %%%Simulation setup%%%
 %%%%%%%%%%%%%%%%%%%%%%
@@ -179,17 +182,60 @@ n_mIL2Ra_tr_tot(1,:) = R_mIL2Ra_tr0*n_tr_tot(1,:);
 n_IL2Ra_tr_tot = zeros(num_t_step+1,40);
 n_IL2Ra_tr_tot(1,:) = R_IL2Ra_tr0*n_tr_tot(1,:);
 
-x_tot = zeros(200000,5);  
+x_tot = zeros(200000,7);  
 t_tot = zeros(200000,1);
 I_tot = zeros(num_t_step+1,40);
 I_tot(1,:) = 0;
 
-x_tot(1,:) = [L_CD80_86_i 0 0 0 0]; % initial condition
+x_tot(1,:) = [L_CD80_86_i 0 0 0 0 0 0]; % initial condition
 t_tot(1) = 0;
 
 %count the number of time points
 num_pt = 1;
 
+%%dynamics of IL2 pulse NP EDIT HERE
+freq_IL2_pulse = 6.2; % per hour
+duration_IL2_pulse = 2 / 60; % minutes (but in hours)
+
+time_pulse = time_end_priming;
+trajectory_pulse = [time_pulse];
+signal_pulse = [0];
+IL2_signal_pulse = 10 * 0.000602;
+eps = 1e-10;
+
+%while time_pulse < time_f
+%    time_pulse = time_pulse + 1/freq_IL2_pulse;
+%    trajectory_pulse = [trajectory_pulse, time_pulse-eps]; signal_pulse = [signal_pulse,0];
+%    trajectory_pulse = [trajectory_pulse, time_pulse+eps]; signal_pulse = [signal_pulse,IL2_signal_pulse];
+%    time_pulse = time_pulse + duration_IL2_pulse;
+%    trajectory_pulse = [trajectory_pulse, time_pulse-eps]; signal_pulse = [signal_pulse,IL2_signal_pulse];
+%    trajectory_pulse = [trajectory_pulse, time_pulse+eps]; signal_pulse = [signal_pulse,0];
+%end
+
+signal_temp = 0;
+while time_pulse < time_f
+    t_temp = exprnd(freq_IL2_pulse);
+    t_temp = 1/t_temp;
+    if t_temp > duration_IL2_pulse
+        trajectory_pulse = [trajectory_pulse, time_pulse+duration_IL2_pulse-eps]; signal_pulse = [signal_pulse,signal_temp];
+        signal_temp = 0;
+        trajectory_pulse = [trajectory_pulse, time_pulse+duration_IL2_pulse+eps]; signal_pulse = [signal_pulse,signal_temp];
+        time_pulse = time_pulse + t_temp;
+        trajectory_pulse = [trajectory_pulse, time_pulse-eps]; signal_pulse = [signal_pulse,signal_temp];
+        signal_temp = IL2_signal_pulse;
+        trajectory_pulse = [trajectory_pulse, time_pulse+eps]; signal_pulse = [signal_pulse,signal_temp];
+    else
+        time_pulse = time_pulse + t_temp;
+        trajectory_pulse = [trajectory_pulse, time_pulse-eps]; signal_pulse = [signal_pulse,signal_temp];
+        signal_temp = signal_temp + IL2_signal_pulse;
+        trajectory_pulse = [trajectory_pulse, time_pulse+eps]; signal_pulse = [signal_pulse,signal_temp];
+    end
+end
+
+%plot(trajectory_pulse, signal_pulse)
+IL2_pulse_interp = griddedInterpolant(trajectory_pulse, signal_pulse, 'pchip');
+plot(trajectory_pulse, IL2_pulse_interp(trajectory_pulse))
+%IL2_pulse_interp = griddedInterpolant([0,time_f],[0,0],'pchip');
 
 %%%%%%%%%%%%%%%%
 %%%Simulation%%%
@@ -229,7 +275,6 @@ C_CTLA4_tr_interp = griddedInterpolant(costim_complex_sol(:,1),costim_complex_so
 for i = 1:num_t_step
     tspan = [(i-1)*time_del i*time_del]; %in hours
   
-    
     %Initial conditions
     x0 = x_tot(num_pt,:); 
     I_0 = I_tot(i, 1);
@@ -256,7 +301,8 @@ for i = 1:num_t_step
         k_deg_mIL2, ... 
         K_TCR_IL2R_alpha, n_TCR_IL2R_alpha, K_JAK_pSTAT5, n_JAK_pSTAT5, K_IL2_JAK_high, K_IL2_JAK_low, R_IL2R_alpha_0, ...
         K_costim_IL2R_alpha, n_costim_IL2R_alpha ,K_TCR_IL2, n_TCR_IL2, K_pSTAT5_IL2, n_pSTAT5_IL2, K_costim_IL2, n_costim_IL2, I_0,...
-        n_tr_l, n_tr0_trans, V_neighbor, S_DC_TR, f_contact_low, f_contact_high, K_C_CD28_tr_U_min, time_end_priming , C_CD28_tr_interp, C_CTLA4_tr_interp),...
+        n_tr_l, n_tr0_trans, V_neighbor, S_DC_TR, f_contact_low, f_contact_high, K_C_CD28_tr_U_min, time_end_priming , C_CD28_tr_interp, C_CTLA4_tr_interp,...
+        IL2_pulse_interp, K_TCR_PI3K, n_TCR_PI3K, K_costim_PI3K, n_costim_PI3K, K_JAK_PI3K, n_JAK_PI3K,k_deg_mMyc,k_deg_Myc,k_transc_basal_mMyc,k_transc_PI3K_mMyc,k_transl_Myc),...
         tspan, x0);
      
     %%PDEs    
@@ -303,7 +349,7 @@ end
 
 x_tot = x_tot(1:num_pt,:);
 t_tot = t_tot(1:num_pt);
-x_tot = [x_tot(:,1:5), k_transl_IL2*x_tot(:,5)/3600]; %IL2 secretion (s^-1)
+x_tot = [x_tot(:,1:7), k_transl_IL2*x_tot(:,5)/3600]; %IL2 secretion (s^-1)
 
 %pSTAT5 activation of Tc
 I_tot_1 = t_tot;
@@ -311,7 +357,7 @@ idx = zeros(num_t_step+1,1);
 %idx(1) = 1;
 for i = 1:num_t_step
     idx(i+1) = find(t_tot == i*time_del);
-    I_tot_1((idx(i)+1):idx(i+1))= I_tot(i,1);
+    I_tot_1((idx(i)+1):idx(i+1))= I_tot(i,1) + IL2_pulse_interp(i*time_del);
     
 end
 
@@ -338,11 +384,17 @@ C_CTLA4_prune = C_CTLA4([1 idx(2:end)']);
 C_costim_tr = C_CD28_tr_interp(x_tot(:,1)/S_DC);
 
 %%Save data
-save('output.mat',...
-        'n_tr_tot', 'D_tr_low_tot', 'n_mIL2Ra_tr_tot', 'n_IL2Ra_tr_tot', 'I_tot', 'x_tot', 't_tot', 't_tot_diff', 'r',...
-        'costim_complex_sol', 'idx', 'I_tot_1', 'S_JAK', 'P_on_TCR_IL2R_alpha', 'C_costim', 'time_end_priming', 'P_on_JAK_pSTAT5', 'S_JAK_tr', 'P_on_JAK_pSTAT5_tr', 'C_CTLA4', 'C_CTLA4_prune', 'C_costim_tr');
+%save('output.mat',...
+%        'n_tr_tot', 'D_tr_low_tot', 'n_mIL2Ra_tr_tot', 'n_IL2Ra_tr_tot', 'I_tot', 'x_tot', 't_tot', 't_tot_diff', 'r',...
+%        'costim_complex_sol', 'idx', 'I_tot_1', 'S_JAK', 'P_on_TCR_IL2R_alpha', 'C_costim', 'time_end_priming', 'P_on_JAK_pSTAT5', 'S_JAK_tr', 'P_on_JAK_pSTAT5_tr', 'C_CTLA4', 'C_CTLA4_prune', 'C_costim_tr');
 
 %%Plot
+
+figure;
+plot(t_tot,x_tot(:,7),'-o');
+legend('Myc');
+axis([time_i time_f 0 1000]);
+
 if false
     figure;
     subplot(3,1,1);
@@ -356,16 +408,23 @@ if false
     subplot(3,1,3);
     plot(t_tot,x_tot(:,2),'-o',t_tot,x_tot(:,3),'-*',t_tot,x_tot(:,4),'-+');
     legend('mIL2Ra','RIL2Ra', 'CIL2Ra');
+
+    figure;
+    plot(t_tot,x_tot(:,6),'-o',t_tot,x_tot(:,7),'-*');
+    legend('mMyc','RMyc');
+    axis([time_i time_f 0 1000]);
+
     figure;
     subplot(3,1,1);
     plot(t_tot,x_tot(:,5),'-.');
     legend('mIL2');
     subplot(3,1,2);
-    plot(t_tot,x_tot(:,6),'-s');
+    plot(t_tot,x_tot(:,8),'-s');
     legend('IL2 secretion (molecules/sec)');
     subplot(3,1,3);
     plot(t_tot_diff,I_tot(:,1)/0.000602,'-s');
     legend('IL2 conc (pM)');
+
     figure;
     subplot(2,1,1);
     plot(t_tot,P_on_JAK_pSTAT5,'-s');
@@ -376,7 +435,6 @@ if false
         t_tot_diff,P_on_JAK_pSTAT5_tr(:,2),'-*',t_tot_diff,P_on_JAK_pSTAT5_tr(:,3),'-+');
     axis([time_i time_f 0 1]);
     legend('pSTAT5 of Tregs at 5um', 'pSTAT5 of Tregs at 10um', 'pSTAT5 of Tregs at 15um');
-
 
     figure;
     surf(r,t_tot_diff(1:10:end),I_tot(1:10:end,:)/0.000602);
@@ -391,6 +449,7 @@ if false
     surf(r,t_tot_diff(1:10:end),n_mIL2Ra_tr_tot(1:10:end,:)./n_tr_tot(1:10:end,:))
     axis([0 r_max time_i time_f])
     ylabel('Time (Hours)'); xlabel('r (um)'); zlabel('mIL2Ra per cell (tr) (#/cell)')   
+    
     figure
     surf(r,t_tot_diff(1:10:end),n_IL2Ra_tr_tot(1:10:end,:)./n_tr_tot(1:10:end,:))
     ylabel('Time (Hours)'); xlabel('r (um)'); zlabel('IL2Ra per cell (tr) (#/cell)') 
