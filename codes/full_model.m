@@ -29,7 +29,7 @@ C_TCR_1_star = 500;
 
 %%Costimulation signaling
 R_CD28 = 30000;
-L_CD80_86_i = scaled_inflam*prmset{idx_prm, 3}; %CD86
+L_CD80_86_i = scale_inflam*prmset{idx_prm, 3}; %CD86
 R_CTLA4_max = 24500;
 k_on_costim = 0.77; %1/s
 k_off_costim = 28;%1/s
@@ -197,13 +197,14 @@ num_pt = 1;
 %velocity = 20.0; 
 vlow = 5; vmax = 20; coefficient = 0.6;
 velocity = coefficient*vlow + (1-coefficient)*vmax;
-freq_IL2_pulse = 6.2 *(velocity/vlow); %per hour
+freq_IL2_pulse = 6.2; %6.2 *(velocity/vlow); %per hour
 duration_IL2_pulse = 2 / 60; %(10/((1-coefficient)*vlow)) / 60; % minutes (but in hours)
+base_duration_IL2_pulse = duration_IL2_pulse;
 
 time_pulse = time_end_priming;
 trajectory_pulse = [time_pulse];
 signal_pulse = [0];
-IL2_signal_pulse = 10 * 0.000602;
+IL2_signal_pulse = 3 * 0.000602;
 eps = 1e-10;
 shape = 1.6750;
 scale = 2.0786;
@@ -211,7 +212,7 @@ e50il2 = 30 *  0.000602;
 hill_n = 1;
 
 % while time_pulse < time_f
-%     time_pulse = time_pulse + 1/freq_IL2_pulse;
+%     time_pulse = time_pulse + (1/freq_IL2_pulse-duration_IL2_pulse);
 %     trajectory_pulse = [trajectory_pulse, time_pulse-eps]; signal_pulse = [signal_pulse,0];
 %     trajectory_pulse = [trajectory_pulse, time_pulse+eps]; signal_pulse = [signal_pulse,IL2_signal_pulse];
 %     time_pulse = time_pulse + duration_IL2_pulse;
@@ -223,40 +224,37 @@ ld = 10;
 signal_temp = 0;
 integrated_signal = 0;
 while time_pulse < time_f
-    coefficient = 1-(integrated_signal(end)^hill_n)/(e50il2^hill_n+integrated_signal(end)^hill_n);
+    coefficient = 1-(integrated_signal^hill_n)/(e50il2^hill_n+integrated_signal^hill_n);
     velocity = coefficient*vlow + (1-coefficient)*vmax;
-    memory_time = ld/velocity; % memory time inversely dependenton frequency
+    memory_time = 3.0; %/  60; default to hours
     freq_IL2_pulse = 6.2 *(velocity/vlow); 
-    t_temp = exprnd(freq_IL2_pulse);
-    t_temp = 1/t_temp;
+    t_temp = exprnd(1/freq_IL2_pulse);
     duration_IL2_pulse = gamrnd(shape,scale,1)/60;
     if t_temp > duration_IL2_pulse
         trajectory_pulse = [trajectory_pulse, time_pulse+duration_IL2_pulse-eps]; signal_pulse = [signal_pulse,signal_temp];
-        integrated_signal = integrated_signal+signal_temp;
         signal_temp = 0;
         trajectory_pulse = [trajectory_pulse, time_pulse+duration_IL2_pulse+eps]; signal_pulse = [signal_pulse,signal_temp];
-        integrated_signal = max(0,integrated_signal - IL2_signal_pulse*(t_temp/memory_time));
+        integrated_signal = integrated_signal*exp(-t_temp/memory_time);
         time_pulse = time_pulse + t_temp;
         trajectory_pulse = [trajectory_pulse, time_pulse-eps]; signal_pulse = [signal_pulse,signal_temp];
-        integrated_signal = integrated_signal+signal_temp;
         signal_temp = IL2_signal_pulse;
         trajectory_pulse = [trajectory_pulse, time_pulse+eps]; signal_pulse = [signal_pulse,signal_temp];
-        integrated_signal = integrated_signal+signal_temp;
+        integrated_signal = integrated_signal+signal_temp*(duration_IL2_pulse/base_duration_IL2_pulse);
     else
         time_pulse = time_pulse + t_temp;
         trajectory_pulse = [trajectory_pulse, time_pulse-eps]; signal_pulse = [signal_pulse,signal_temp];
-        integrated_signal = integrated_signal+signal_temp;
+        integrated_signal = integrated_signal*exp(-t_temp/memory_time);
         signal_temp = signal_temp + IL2_signal_pulse;
         trajectory_pulse = [trajectory_pulse, time_pulse+eps]; signal_pulse = [signal_pulse,signal_temp];
-        integrated_signal = integrated_signal+signal_temp;
+        integrated_signal = integrated_signal+signal_temp*(duration_IL2_pulse/base_duration_IL2_pulse);
     end
 end
 
 %plot(trajectory_pulse, signal_pulse)
 IL2_pulse_interp = griddedInterpolant(trajectory_pulse, signal_pulse, 'pchip');
 %integrated_interp = griddedInterpolant(trajectory_pulse, integrated_signal, 'pchip');
-%plot(trajectory_pulse, IL2_pulse_interp(trajectory_pulse))
-%axis([0 time_f 0 2e-2])
+%plot(trajectory_pulse, IL2_pulse_interp(trajectory_pulse)./  0.000602)
+%axis([0 time_f 0 50]); xlabel('Time (hours)'); ylabel('IL-2 concenrtation (pM)')
 %figure; plot(trajectory_pulse, integrated_interp(trajectory_pulse))
 %IL2_pulse_interp = griddedInterpolant([0,time_f],[0,0],'pchip');
 
@@ -410,14 +408,16 @@ IL2_pulse = IL2_pulse_interp(t_tot);
 %%Save data
 %save('output.mat',...
 %        'n_tr_tot', 'D_tr_low_tot', 'n_mIL2Ra_tr_tot', 'n_IL2Ra_tr_tot', 'I_tot', 'x_tot', 't_tot', 't_tot_diff', 'r',...
-%        'costim_complex_sol', 'idx', 'I_tot_1', 'S_JAK', 'P_on_TCR_IL2R_alpha', 'C_costim', 'time_end_priming', 'P_on_JAK_pSTAT5', 'S_JAK_tr', 'P_on_JAK_pSTAT5_tr', 'C_CTLA4', 'C_CTLA4_prune', 'C_costim_tr');
+%        'costim_complex_sol', 'idx', 'I_tot_1', 'S_JAK', 'P_on_TCR_IL2R_alpha', 'C_costim', 'time_end_priming',...
+%        'P_on_JAK_pSTAT5', 'S_JAK_tr', 'P_on_JAK_pSTAT5_tr', 'C_CTLA4', 'C_CTLA4_prune', 'C_costim_tr',...
+%        'IL2_pulse', 'freq_IL2_pulse', 'duration_IL2_pulse');
 
 %%Plot
 
-figure;
-plot(t_tot,x_tot(:,7),'-o');
-legend('Myc');
-axis([time_i time_f 0 1000]);
+%figure;
+%plot(t_tot,x_tot(:,7),'-o');
+%legend('Myc'); xlabel('Time (hours)'); ylabel('Concentration (a.u.)')
+%axis([time_i time_f 0 1000]);
 
 if false
     figure;
@@ -484,3 +484,5 @@ if false
     ylabel('Time (Hours)'); xlabel('r (um)'); zlabel('pSTAT5 (tr) (a.u.)') 
     %axis([0 r_max time_i time_f])
 end
+
+%exit
